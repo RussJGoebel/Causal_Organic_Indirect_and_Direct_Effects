@@ -1,0 +1,121 @@
+---
+title: "Social-Determinants-of-Health Mediation Analysis"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+```
+
+
+# Summary
+
+Let $Y$ denote disability status. Let $M$ denote Social Determinants of Health. Let $A$ denote 
+
+$\hat{P}\bigg(Y = 1 | Hispanic, M$ has distribution as in non-Hispanic$\bigg) = \frac{\sum_{i=1}^{n}\hat{P}(Y = 1 | Hispanic, m_i)}{\# non-Hispanic}.$ 
+
+```{r}
+
+IPUMS_dataset <- read_csv('Data/IPUMS_Marte.csv') # Load Data
+IPUMS_dataset <- IPUMS_dataset %>% filter(StrokeSubset %in% c(0,1)) # Filter only Hispanic/Nonhispanic
+
+```
+# Non-bootstrapped estimate
+
+```{r}
+
+logistic_regression <- glm(ComDiff ~Hispanic+SexMale + AGE + 
+                    South + Married + FAMSIZE + BMICALC + Smoker+Education+WebUse+PovertyLevel+DelayInCare+Cit,
+                  family = binomial(link = "logit"), data = IPUMS_dataset)
+
+x <- fitted(logistic_regression)
+y <- residuals(logistic_regression, type = "response")
+arm::binnedplot(x,y)
+
+IPUMS_dataset_hispanic <- IPUMS_dataset %>% filter(Hispanic == 1)
+IPUMS_dataset_non_hispanic <- IPUMS_dataset %>% filter(Hispanic == 0)
+
+IPUMS_dataset_non_hispanic_but_mediator_as_in_hispanic <- IPUMS_dataset_hispanic %>% mutate(Hispanic = 0)
+IPUMS_dataset_hispanic_but_mediator_as_in_non_hispanic <- IPUMS_dataset_non_hispanic %>% mutate(Hispanic = 1)
+
+pred_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic <- predict(logistic_regression,IPUMS_dataset_non_hispanic_but_mediator_as_in_hispanic, type = "response")
+pred_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic <- predict(logistic_regression,IPUMS_dataset_hispanic_but_mediator_as_in_non_hispanic, type = "response")
+
+mean_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic <- mean(pred_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic)
+
+mean_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic <- mean(pred_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic)
+
+organic_indirect_effect <- mean_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic-mean(IPUMS_dataset_non_hispanic$ComDiff)
+
+organic_direct_effect <- mean(IPUMS_dataset_hispanic$ComDiff)-mean_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic
+
+
+```
+
+# Boostrapped Estimate
+
+```{r}
+n <- dim(IPUMS_dataset)[1]
+
+bootstrap_sample <- function(n_replicates){
+  
+  p_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic <- numeric(n_replicates)
+  p_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic <- numeric(n_replicates)
+  
+  organic_direct_effect <- numeric(n_replicates)
+  organic_indirect_effect <- numeric(n_replicates)
+  
+  for(jj in 1:n_replicates){
+  
+  bootstrap_dataset <- IPUMS_dataset[sample(n, replace = TRUE),]
+  
+  logistic_regression <- glm(ComDiff ~Hispanic+SexMale + AGE + 
+                    South + Married + FAMSIZE + BMICALC + Smoker+Education+WebUse+PovertyLevel+DelayInCare+Cit,
+                  family = binomial, data = bootstrap_dataset)
+
+  IPUMS_dataset_hispanic <- bootstrap_dataset %>% filter(Hispanic == 1)
+  IPUMS_dataset_non_hispanic <- bootstrap_dataset %>% filter(Hispanic == 0)
+  
+  IPUMS_dataset_non_hispanic_but_mediator_as_in_hispanic <- IPUMS_dataset_hispanic %>% mutate(Hispanic = 0)
+  IPUMS_dataset_hispanic_but_mediator_as_in_non_hispanic <- IPUMS_dataset_non_hispanic %>% mutate(Hispanic = 1)
+  
+  pred_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic <- predict(logistic_regression,IPUMS_dataset_non_hispanic_but_mediator_as_in_hispanic, type = "response")
+  pred_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic <- predict(logistic_regression,IPUMS_dataset_hispanic_but_mediator_as_in_non_hispanic, type = "response")
+  
+  p_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic[jj] <- mean(pred_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic)
+  
+  p_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic[jj] <- mean(pred_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic)
+  
+  organic_indirect_effect[jj] <- mean_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic-mean(IPUMS_dataset_non_hispanic$ComDiff)
+
+organic_direct_effect[jj] <- mean(IPUMS_dataset_hispanic$ComDiff)-mean_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic
+
+  
+  
+  }
+  
+  return(list(p_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic = p_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic,
+              p_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic = p_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic,
+                  organic_indirect_effect = organic_indirect_effect,
+         organic_direct_effect = organic_direct_effect)
+     )
+  
+}
+
+
+
+```
+
+```{r}
+results <- bootstrap_sample(5000)
+```
+
+```{r}
+hist(results$p_ComDiff_for_non_hispanic_but_mediator_as_in_hispanic)
+hist(results$p_ComDiff_for_hispanic_but_mediator_as_in_non_hispanic)
+hist(results$organic_indirect_effect)
+hist(results$organic_direct_effect)
+```
+
+
+
